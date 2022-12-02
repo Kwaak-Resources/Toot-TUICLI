@@ -14,38 +14,85 @@ from toot.wcstring import wc_wrap
 
 
 START_CODES = {
-    'red': '\033[31m',
-    'green': '\033[32m',
-    'yellow': '\033[33m',
-    'blue': '\033[34m',
-    'magenta': '\033[35m',
-    'cyan': '\033[36m',
+    'reset': '\033[0m',
+    'bold': '\033[1m',
+    'dim': '\033[2m',
+    'italic': '\033[3m',
+    'underline': '\033[4m',
+    'red': '\033[91m',
+    'green': '\033[92m',
+    'yellow': '\033[93m',
+    'blue': '\033[94m',
+    'magenta': '\033[95m',
+    'cyan': '\033[96m',
 }
 
 END_CODE = '\033[0m'
 
-START_PATTERN = "<(" + "|".join(START_CODES.keys()) + ")>"
-
-END_PATTERN = "</(" + "|".join(START_CODES.keys()) + ")>"
-
-
-def start_code(match):
-    name = match.group(1)
-    return START_CODES[name]
-
-
-def colorize(text):
-    text = re.sub(START_PATTERN, start_code, text)
-    text = re.sub(END_PATTERN, END_CODE, text)
-
-    return text
+STYLE_TAG_PATTERN = re.compile(r"""
+    (?<!\\)     # not preceeded by a backslash - allows escaping
+    <           # literal
+    (/)?        # optional closing - first group
+    (.*?)       # style names - ungreedy - second group
+    >           # literal
+""", re.X)
 
 
-def strip_tags(text):
-    text = re.sub(START_PATTERN, '', text)
-    text = re.sub(END_PATTERN, '', text)
+def colorize(message):
+    """
+    Replaces style tags in `message` with ANSI escape codes.
 
-    return text
+    Markup is inspired by HTML, but you can use multiple words pre tag, e.g.:
+
+        "<red bold>alert!</red bold> a thing happened"
+
+    Empty closing tag will reset all styes:
+
+        "<red bold>alert!</> a thing happened"
+
+    Styles can be nested:
+
+        "plain <red>red <underline> red <blue>and</blue> underline </underline> red </red> plain"
+    """
+    def _dedupe(list):
+        newlist = []
+        for item in list:
+            if item not in newlist:
+                newlist.append(item)
+        return newlist
+
+    def _generator(message):
+        # A list is used instead of a set because we want to keep style order
+        # This allows nesting colors, e.g. "<blue>foo<red>bar</red>baz</blue>"
+        active_styles = []
+        last_char = 0
+
+        for match in re.finditer(STYLE_TAG_PATTERN, message):
+            is_closing = bool(match.group(1))
+            styles = match.group(2).strip().split()
+
+            if is_closing:
+                active_styles = [s for s in active_styles if s not in styles]
+            else:
+                active_styles = _dedupe(active_styles + styles)
+
+            codes = [START_CODES.get(style) for style in active_styles]
+            codes = [c for c in codes if c]
+            start, end = match.span()
+            fragment = message[last_char:start]
+            last_char = end
+
+            yield fragment.replace("\\<", "<")
+            yield END_CODE
+            yield from codes
+
+        yield END_CODE
+
+    return "".join(_generator(message))
+
+
+def strip_tags(message):
+    return re.sub(STYLE_TAG_PATTERN, "", message)
 
 
 def use_ansi_color():
