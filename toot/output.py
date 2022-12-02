@@ -6,6 +6,8 @@ import sys
 import textwrap
 
 from textwrap import wrap
+
+import click
 from toot.tui.utils import parse_datetime
 from wcwidth import wcswidth
 
@@ -117,6 +119,13 @@ def use_ansi_color():
 USE_ANSI_COLOR = use_ansi_color()
 
 QUIET = "--quiet" in sys.argv
+
+
+def echo(message, nl=True, err=False):
+    ctx = click.get_current_context()
+    if not ctx.obj.quiet:
+        message = colorize(message)
+        click.echo(message, nl=nl, err=err)
 
 
 def print_out(*args, **kwargs):

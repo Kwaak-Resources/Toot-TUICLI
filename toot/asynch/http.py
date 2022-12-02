@@ -8,7 +8,6 @@ from toot import __version__
 from typing import Mapping, Dict, Optional, Tuple
 from aiohttp import ClientSession, ClientResponse, TraceConfig
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 Params = Dict[str, str]

@@ -68,8 +68,8 @@ async def create_app(domain: str, scheme: str = "https") -> Response:
 # https://docs.joinmastodon.org/methods/instance/
 # ------------------------------------------------------------------------------
 
-async def instance(domain: str, scheme: str = "https") -> Response:
-    return await request("GET", f"{scheme}://{domain}/api/v1/instance")
+async def instance(url: str) -> Response:
+    return await request("GET", f"{url}/api/v1/instance")
 
 
 # ------------------------------------------------------------------------------
