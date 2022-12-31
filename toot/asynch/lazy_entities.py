@@ -1,14 +1,98 @@
+import inspect
+import json
 import typing
-import dataclasses
 
-from dataclasses import dataclass, is_dataclass
-from datetime import date, datetime, time
-from typing import Dict, List, Optional
+from datetime import date, datetime
+from typing import List, Optional
 from typing import get_origin, get_args
+from functools import cache
+
+from toot.utils import get_text
 
 
-@dataclass
-class AccountField:
+@cache
+def get_type_hints_cached(cls):
+    return typing.get_type_hints(cls)
+
+
+def prune_optional(hint):
+    if get_origin(hint) == typing.Union:
+        args = get_args(hint)
+        if len(args) == 2 and args[1] == type(None):
+            return args[0]
+
+    return hint
+
+
+class Entity:
+    def __init__(self, json_data: str):
+        self._json = json_data
+        self._data = json.loads(json_data)
+
+    def __getattr__(self, name):
+        hints = get_type_hints_cached(self.__class__)
+        if name not in hints:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+        # TODO: read default value from field definition somehow
+        default = None
+        value = self._data.get(name, default)
+        hint = prune_optional(hints[name])
+        return self.convert(value, hint)
+
+    def __repr__(self):
+        def _fields():
+            hints = get_type_hints_cached(self.__class__)
+            for name, hint in hints.items():
+                hint = prune_optional(hints[name])
+                value = self._data.get(name)
+                if value is None:
+                    yield f"{name}=None"
+                elif hint in [str, date, datetime]:
+                    yield f"{name}='{value}'"
+                elif hint in [int, bool, dict]:
+                    yield f"{name}={value}"
+                else:
+                    yield f"{name}=..."
+
+        name = self.__class__.__name__
+        fields = ", ".join(_fields())
+        return f"{name}({fields})"
+
+    @property
+    def __dict__(self):
+        return self._data
+
+    # TODO: override __dict__?
+    # TODO: make readonly
+
+    # def __setattribute__(self, name):
+    #     raise Exception("Entities are read-only")
+
+    # def __delattribute__(self, name):
+    #     raise Exception("Entities are read-only")
+
+    def convert(self, value, hint):
+        if hint in [str, int, bool, dict]:
+            return value
+
+        if hint == datetime:
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+
+        if hint == date:
+            return date.fromisoformat(value)
+
+        if get_origin(hint) == list:
+            (inner_hint,) = get_args(hint)
+            return [self.convert(v, inner_hint) for v in value]
+
+        if inspect.isclass(hint) and issubclass(hint, Entity):
+            return hint(value)
+
+        raise ValueError(f"hint??? {hint}")
+
+
+class AccountField(Entity):
     """
     https://docs.joinmastodon.org/entities/Account/#Field
     """
@@ -17,8 +101,7 @@ class AccountField:
     verified_at: Optional[datetime]
 
 
-@dataclass
-class CustomEmoji:
+class CustomEmoji(Entity):
     """
     https://docs.joinmastodon.org/entities/CustomEmoji/
     """
@@ -29,8 +112,7 @@ class CustomEmoji:
     category: str
 
 
-@dataclass
-class Account:
+class Account(Entity):
     """
     https://docs.joinmastodon.org/entities/Account/
     """
@@ -52,23 +134,25 @@ class Account:
     discoverable: Optional[bool]
     noindex: Optional[bool]
     moved: Optional["Account"]
-    suspended: Optional[bool]
-    limited: Optional[bool]
+    suspended: bool = False
+    limited: bool = False
     created_at: datetime
     last_status_at: Optional[date]
     statuses_count: int
     followers_count: int
     following_count: int
 
+    @property
+    def note_plaintext(self) -> str:
+        return get_text(self.note)
 
-@dataclass
-class Application:
+
+class Application(Entity):
     name: str
     website: str
 
 
-@dataclass
-class MediaAttachment:
+class MediaAttachment(Entity):
     id: str
     type: str
     url: str
@@ -79,8 +163,7 @@ class MediaAttachment:
     blurhash: str
 
 
-@dataclass
-class StatusMention:
+class StatusMention(Entity):
     """
     https://docs.joinmastodon.org/entities/Status/#Mention
     """
@@ -90,8 +173,7 @@ class StatusMention:
     acct: str
 
 
-@dataclass
-class StatusTag:
+class StatusTag(Entity):
     """
     https://docs.joinmastodon.org/entities/Status/#Tag
     """
@@ -99,8 +181,7 @@ class StatusTag:
     url: str
 
 
-@dataclass
-class PollOption:
+class PollOption(Entity):
     """
     https://docs.joinmastodon.org/entities/Poll/#Option
     """
@@ -108,8 +189,7 @@ class PollOption:
     votes_count: Optional[int]
 
 
-@dataclass
-class Poll:
+class Poll(Entity):
     """
     https://docs.joinmastodon.org/entities/Poll/
     """
@@ -125,8 +205,7 @@ class Poll:
     own_votes: Optional[List[int]]
 
 
-@dataclass
-class PreviewCard:
+class PreviewCard(Entity):
     url: str
     title: str
     description: str
@@ -143,21 +222,18 @@ class PreviewCard:
     blurhash: Optional[str]
 
 
-@dataclass
-class FilterKeyword:
+class FilterKeyword(Entity):
     id: str
     keyword: str
     whole_word: str
 
 
-@dataclass
-class FilterStatus:
+class FilterStatus(Entity):
     id: str
     status_id: str
 
 
-@dataclass
-class Filter:
+class Filter(Entity):
     id: str
     title: str
     context: List[str]
@@ -167,15 +243,13 @@ class Filter:
     statuses: List[FilterStatus]
 
 
-@dataclass
-class FilterResult:
+class FilterResult(Entity):
     filter: Filter
     keyword_matches: Optional[List[str]]
     status_matches: Optional[str]
 
 
-@dataclass
-class Status:
+class Status(Entity):
     id: str
     uri: str
     created_at: datetime
@@ -211,47 +285,3 @@ class Status:
     @property
     def original(self):
         return self.reblog or self
-
-
-def from_dict(cls, data):
-    def _fields():
-        hints = typing.get_type_hints(cls)
-        for field in dataclasses.fields(cls):
-            default = field.default if field.default is not dataclasses.MISSING else None
-            field_type = prune_optional(hints[field.name])
-            value = data.get(field.name, default)
-            yield convert(field_type, value)
-
-    return cls(*_fields())
-
-
-def convert(field_type, value):
-    if value is None:
-        return None
-
-    if field_type in [str, int, bool, dict]:
-        return value
-
-    if field_type == datetime:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
-
-    if field_type == date:
-        return date.fromisoformat(value)
-
-    if get_origin(field_type) == list:
-        (inner_type,) = get_args(field_type)
-        return [convert(inner_type, x) for x in value]
-
-    if is_dataclass(field_type):
-        return from_dict(field_type, value)
-
-    raise ValueError(f"Not implemented for type '{field_type}'")
-
-
-def prune_optional(field_type):
-    if get_origin(field_type) == typing.Union:
-        args = get_args(field_type)
-        if len(args) == 2 and args[1] == type(None):
-            return args[0]
-
-    return field_type

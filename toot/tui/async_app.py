@@ -1,10 +1,9 @@
 import asyncio
 import httpx
 import logging
-import toot
 import urwid
 
-from toot import config, __version__
+from toot import App, User, config, __version__
 from urwid import font
 
 from toot.tui.constants import PALETTE
@@ -16,7 +15,7 @@ urwid.set_encoding('UTF-8')
 
 
 class Toot:
-    def __init__(self, user: toot.User, app: toot.App):
+    def __init__(self, user: User, app: App):
         logger.info("init")
         self.user = user
         self.app = app

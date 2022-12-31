@@ -149,7 +149,6 @@ async def app_token(app):
 # ???
 # ------------------------------------------------------------------------------
 
-
 async def search_accounts(app, user, query):
     return await auth_request(app, user, "GET", "/api/v1/accounts/search", params={"q": query})
 

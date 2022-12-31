@@ -6,15 +6,16 @@ import random
 import sys
 
 from typing import List, NamedTuple, Optional, Tuple
-from toot import __version__
+from toot import App, User, __version__, config
 from toot.asynch import api
+from toot.asynch.lazy_entities import Account, Status
 from toot.output import echo, print_out
 from toot.utils import EOF_KEY, editor_input, multiline_input
 
 # Tweak the Click context
 # https://click.palletsprojects.com/en/8.1.x/api/#context
 CONTEXT = dict(
-    # Enable using environment variables to specify options
+    # Enable using environment variables to set options
     auto_envvar_prefix='TOOT',
     # Add shorthand -h for invoking help
     help_option_names=['-h', '--help'],
@@ -34,7 +35,10 @@ def validate_language(ctx, param, value: str) -> str:
     return value
 
 
+# Data object to add to Click context
 class Obj(NamedTuple):
+    app: Optional[App]
+    user: Optional[User]
     color: bool
     debug: bool
     json: bool
@@ -49,9 +53,9 @@ class Obj(NamedTuple):
 @click.version_option(version=__version__, prog_name="toot")
 @click.pass_context
 def cli(ctx, debug: bool, color: bool, quiet: bool, json: bool):
+    user, app = config.get_active_user_app()
     ctx.color = color
-    ctx.obj = Obj(color=color, debug=debug, json=json, quiet=quiet)
-    print(ctx.obj)
+    ctx.obj = Obj(app, user, color, debug, json, quiet)
     if debug:
         logging.basicConfig(level=logging.DEBUG)
 
@@ -60,10 +64,31 @@ def cli(ctx, debug: bool, color: bool, quiet: bool, json: bool):
 @click.argument("url")
 def instance(url: str):
     instance = asyncio.run(api.instance(url)).json()
-    # print(instance.body)
     click.secho(instance["title"], fg="green")
     click.secho(instance["uri"], fg="blue")
     click.echo(f'Running Mastodon {instance["version"]}')
+
+
+@cli.command()
+@click.pass_context
+def whoami(ctx):
+    corutine = api.verify_credentials(ctx.obj.app, ctx.obj.user)
+    response = asyncio.run(corutine)
+    account = Account(response.json())
+    print(account.acct)
+    print(account.display_name)
+    print(account.note_plaintext)
+
+
+@cli.command()
+@click.pass_context
+def timeline(ctx):
+    corutine = api.timeline(ctx.obj.app, ctx.obj.user)
+    response = asyncio.run(corutine)
+    timeline = [Status(s) for s in response.json()]
+
+    for status in timeline:
+        print(status.__dict__)
 
 
 @cli.command()
